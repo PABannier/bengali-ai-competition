@@ -3,11 +3,12 @@ import ast
 from tqdm import tqdm
 from model_dispatcher import MODEL_DISPATCHER
 from dataset import BengaliAIDataset
+from metric import macro_recall
 
 import torch
 import torch.nn as nn
 
-DEVICE = torch.device('cpu')
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 TRAINING_FOLDS_CSV = os.environ.get("TRAINING_FOLDS_CSV")
 
 IMG_HEIGHT = int(os.environ.get("IMG_HEIGHT"))
@@ -40,13 +41,19 @@ def loss_fn(outputs, targets):
 def train(dataset, data_loader, model, optimizer):
     model.train()
 
+    final_loss = 0
+    counter = 0
+    final_outputs = []
+    final_targets = []
+
     for bi, d in tqdm(enumerate(data_loader), total=int(len(dataset)/ data_loader.batch_size)):
+        counter += 1
         image = d["image"]
         grapheme_root = d["grapheme_root"]
         vowel_diacritic = d["vowel_diacritic"]
         consonant_diacritic = d["consonant_diacritic"]
 
-        if DEVICE == torch.device('cuda'):
+        if torch.cuda.is_available():
             image = image.to(DEVICE, type=torch.float)
             grapheme_root = grapheme_root.to(DEVICE, type=torch.long)
             vowel_diacritic = vowel_diacritic.to(DEVICE, type=torch.long)
@@ -60,12 +67,29 @@ def train(dataset, data_loader, model, optimizer):
         loss.backward()
         optimizer.step()
 
+        final_loss += loss
+
+        o1, o2, o3 = outputs
+        t1, t2, t3 = targets
+        final_outputs.append(torch.cat((o1,o2,o3), dim=1))
+        final_targets.append(torch.stack((t1,t2,t3), dim=1))
+
+    final_outputs = torch.cat(final_outputs)
+    final_targets = torch.cat(final_targets)
+
+    print("=================Train=================")
+    macro_recall_score = macro_recall(final_outputs, final_targets)
+
+    return final_loss/counter , macro_recall_score
+
 
 def evaluate(dataset, data_loader, model):
     model.eval()
 
     final_loss = 0
     counter = 0
+    final_outputs = []
+    final_targets = []
 
     for bi, d in tqdm(enumerate(data_loader), total=int(len(dataset)/ data_loader.batch_size)):
         counter += 1
@@ -74,24 +98,34 @@ def evaluate(dataset, data_loader, model):
         vowel_diacritic = d["vowel_diacritic"]
         consonant_diacritic = d["consonant_diacritic"]
 
-        image = image.to(DEVICE, type=torch.float)
-        grapheme_root = grapheme_root.to(DEVICE, type=torch.long)
-        vowel_diacritic = vowel_diacritic.to(DEVICE, type=torch.long)
-        consonant_diacritic = consonant_diacritic.to(DEVICE, type=torch.long)
+        if torch.cuda.is_available():
+            image = image.to(DEVICE, type=torch.float)
+            grapheme_root = grapheme_root.to(DEVICE, type=torch.long)
+            vowel_diacritic = vowel_diacritic.to(DEVICE, type=torch.long)
+            consonant_diacritic = consonant_diacritic.to(DEVICE, type=torch.long)
 
         outputs = model(image)
         targets = (grapheme_root, vowel_diacritic, consonant_diacritic)
+        
         loss = loss_fn(outputs, targets)
         final_loss += loss
-    
-    return final_loss / counter
 
+        o1, o2, o3 = outputs
+        t1, t2, t3 = targets
+        final_outputs.append(torch.cat((o1,o2,o3), dim=1))
+        final_targets.append(torch.stack((t1,t2,t3), dim=1))
+        
+    final_outputs = torch.cat(final_outputs)
+    final_targets = torch.cat(final_targets)
+
+    print("=================Validation=================")
+    macro_recall_score = macro_recall(final_outputs, final_targets)
+
+    return final_loss / counter , macro_recall_score
+    
 
 def main():
-    try:
-        model = MODEL_DISPATCHER[BASE_MODEL](pretrained=True)
-    except KeyError:
-        raise NotImplementedError
+    model = MODEL_DISPATCHER[BASE_MODEL](pretrained=True)
 
     model.to(DEVICE)
 

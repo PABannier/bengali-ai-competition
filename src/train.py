@@ -7,7 +7,7 @@ from dataset import BengaliAIDataset
 import torch
 import torch.nn as nn
 
-DEVICE = "cuda"
+DEVICE = torch.device('cpu')
 TRAINING_FOLDS_CSV = os.environ.get("TRAINING_FOLDS_CSV")
 
 IMG_HEIGHT = int(os.environ.get("IMG_HEIGHT"))
@@ -31,13 +31,10 @@ LEARNING_RATE = float(os.environ.get("LEARNING_RATE"))
 def loss_fn(outputs, targets):
     o1, o2, o3 = outputs
     t1, t2, t3 = targets
-
-    l1 = nn.CrossEntropyLoss(o1, t1)
-    l2 = nn.CrossEntropyLoss(o2, t2)
-    l3 = nn.CrossEntropyLoss(o3, t3)
-
+    l1 = nn.CrossEntropyLoss()(o1, t1)
+    l2 = nn.CrossEntropyLoss()(o2, t2)
+    l3 = nn.CrossEntropyLoss()(o3, t3)
     return (l1 + l2 + l3) / 3 # Try a weighted loss
-
 
 
 def train(dataset, data_loader, model, optimizer):
@@ -49,10 +46,11 @@ def train(dataset, data_loader, model, optimizer):
         vowel_diacritic = d["vowel_diacritic"]
         consonant_diacritic = d["consonant_diacritic"]
 
-        image = image.to_device(DEVICE, type=torch.float)
-        grapheme_root = grapheme_root.to_device(DEVICE, type=torch.long)
-        vowel_diacritic = vowel_diacritic.to_device(DEVICE, type=torch.long)
-        consonant_diacritic = consonant_diacritic.to_device(DEVICE, type=torch.long)
+        if DEVICE == torch.device('cuda'):
+            image = image.to(DEVICE, type=torch.float)
+            grapheme_root = grapheme_root.to(DEVICE, type=torch.long)
+            vowel_diacritic = vowel_diacritic.to(DEVICE, type=torch.long)
+            consonant_diacritic = consonant_diacritic.to(DEVICE, type=torch.long)
 
         optimizer.zero_grad()
         outputs = model(image)
@@ -61,7 +59,6 @@ def train(dataset, data_loader, model, optimizer):
 
         loss.backward()
         optimizer.step()
-
 
 
 def evaluate(dataset, data_loader, model):
@@ -77,10 +74,10 @@ def evaluate(dataset, data_loader, model):
         vowel_diacritic = d["vowel_diacritic"]
         consonant_diacritic = d["consonant_diacritic"]
 
-        image = image.to_device(DEVICE, type=torch.float)
-        grapheme_root = grapheme_root.to_device(DEVICE, type=torch.long)
-        vowel_diacritic = vowel_diacritic.to_device(DEVICE, type=torch.long)
-        consonant_diacritic = consonant_diacritic.to_device(DEVICE, type=torch.long)
+        image = image.to(DEVICE, type=torch.float)
+        grapheme_root = grapheme_root.to(DEVICE, type=torch.long)
+        vowel_diacritic = vowel_diacritic.to(DEVICE, type=torch.long)
+        consonant_diacritic = consonant_diacritic.to(DEVICE, type=torch.long)
 
         outputs = model(image)
         targets = (grapheme_root, vowel_diacritic, consonant_diacritic)
@@ -96,7 +93,7 @@ def main():
     except KeyError:
         raise NotImplementedError
 
-    model.to_device(DEVICE)
+    model.to(DEVICE)
 
     train_dataset = BengaliAIDataset(
         folds=TRAINING_FOLDS, 
@@ -142,7 +139,7 @@ def main():
         train(train_dataset, train_loader, model, optimizer)
         val_score = evaluate(valid_dataset, valid_loader, model)
         scheduler.step(val_score)
-        torch.save(model.state_dict(), f'{BASE_MODEL}_fold{VALIDATION_FOLDS[0]}.h5')
+        torch.save(model.state_dict(), f'../models/{BASE_MODEL}_fold{VALIDATION_FOLDS[0]}.h5')
 
 if __name__ == "__main__":
     main()                                              
